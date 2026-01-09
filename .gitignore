@@ -3,3 +3,5 @@ SlurmOutput/
 temp/
 .vscode/
 *.ncu-rep
+
+*.DS_STORE
