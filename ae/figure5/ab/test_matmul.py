@@ -9,6 +9,7 @@ if __name__ == "__main__":
     parser.add_argument("--simtpu", action="store_true", help="Enable simulation")
     parser.add_argument("--simtpu-new", action="store_true", help="Enable simulation")
     parser.add_argument("--simgpu", action="store_true", help="Enable simulation")
+    parser.add_argument("--simgpu-hbf", action="store_true", help="Enable simulation")
     parser.add_argument("--simamd", action="store_true", help="amd simulation")
     parser.add_argument("--roofline", action="store_true", help="Roofline simulation")
     args = parser.parse_args()
@@ -19,6 +20,8 @@ if __name__ == "__main__":
         pcb = device_dict["TPUv3_new"]
     if args.simgpu:
         pcb = device_dict["A100_80GB_fp16"]
+    if args.simgpu_hbf:
+        pcb = device_dict["A100_80GB_fp16_HBF"]
 
     MI210 = device_dict["MI210"]
     amd_overhead = MI210.compute_module.overhead.softmax
@@ -45,13 +48,13 @@ if __name__ == "__main__":
         if args.simtpu:
             if args.roofline:
                 latency = model.roofline_model(pcb) + 110e-6
-                file_name='matmul_TPUv3_roofline.csv'
+                file_name = "matmul_TPUv3_roofline.csv"
             else:
                 latency = (
                     model.compile_and_simulate(pcb, compile_mode="heuristic-TPU")
                     + 110e-6
                 )
-                file_name='matmul_TPUv3_sim.csv'
+                file_name = "matmul_TPUv3_sim.csv"
 
         if args.simtpu_new:
             if args.roofline:
@@ -64,17 +67,27 @@ if __name__ == "__main__":
         if args.simgpu:
             if args.roofline:
                 latency = model.roofline_model(pcb) + 2.1e-5
-                file_name='matmul_A100_roofline.csv'
+                file_name = "matmul_A100_roofline.csv"
             else:
                 latency = (
                     model.compile_and_simulate(pcb, compile_mode="heuristic-GPU")
                     + 2.1e-5
                 )
-                file_name='matmul_A100_sim.csv'
+                file_name = "matmul_A100_sim.csv"
+        if args.simgpu_hbf:
+            if args.roofline:
+                latency = model.roofline_model(pcb) + 2.1e-5
+                file_name = "matmul_A100_HBF_roofline.csv"
+            else:
+                latency = (
+                    model.compile_and_simulate(pcb, compile_mode="heuristic-GPU")
+                    + 2.1e-5
+                )
+                file_name = "matmul_A100_HBF_sim.csv"
         if args.simamd:
             if args.roofline:
                 latency = model.roofline_model(pcb_module=MI210) + amd_overhead
-                file_name='matmul_MI210_roofline.csv'
+                file_name = "matmul_MI210_roofline.csv"
             else:
                 latency = (
                     model.compile_and_simulate(
@@ -82,11 +95,11 @@ if __name__ == "__main__":
                     )
                     + amd_overhead
                 )
-                file_name='matmul_MI210_sim.csv'
+                file_name = "matmul_MI210_sim.csv"
         tflops = 2 * M * N * K / latency / 1e12
-        print(f"{M}, {N}, {K}, {latency*1e3:.4f}ms, {tflops:.4f}Tflops", flush=True)
-        with open(f'ae/figure5/ab/{file_name}', 'a') as f:
-            f.write(f"{M}, {N}, {K}, {latency*1e3:.4f}ms, {tflops:.4f}Tflops\n")
+        print(f"{M}, {N}, {K}, {latency * 1e3:.4f}ms, {tflops:.4f}Tflops", flush=True)
+        with open(f"ae/figure5/ab/{file_name}", "a") as f:
+            f.write(f"{M}, {N}, {K}, {latency * 1e3:.4f}ms, {tflops:.4f}Tflops\n")
 
     M = 8192
     print(f"Performance of Matmul with M={M}, N=K")
@@ -124,6 +137,14 @@ if __name__ == "__main__":
                     model.compile_and_simulate(pcb, compile_mode="heuristic-GPU")
                     + 2.1e-5
                 )
+        if args.simgpu_hbf:
+            if args.roofline:
+                latency = model.roofline_model(pcb) + 2.1e-5
+            else:
+                latency = (
+                    model.compile_and_simulate(pcb, compile_mode="heuristic-GPU")
+                    + 2.1e-5
+                )
         if args.simamd:
             if args.roofline:
                 latency = model.roofline_model(pcb_module=MI210) + amd_overhead
@@ -135,6 +156,6 @@ if __name__ == "__main__":
                     + amd_overhead
                 )
         tflops = 2 * M * N * K / latency / 1e12
-        print(f"{M}, {N}, {K}, {latency*1e3:.4f}ms, {tflops:.4f}Tflops", flush=True)
-        with open(f'ae/figure5/ab/{file_name}', 'a') as f:
-            f.write(f"{M}, {N}, {K}, {latency*1e3:.4f}ms, {tflops:.4f}Tflops\n")
+        print(f"{M}, {N}, {K}, {latency * 1e3:.4f}ms, {tflops:.4f}Tflops", flush=True)
+        with open(f"ae/figure5/ab/{file_name}", "a") as f:
+            f.write(f"{M}, {N}, {K}, {latency * 1e3:.4f}ms, {tflops:.4f}Tflops\n")

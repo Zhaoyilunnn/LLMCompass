@@ -14,5 +14,9 @@ system_dict = {
         device_dict["A100_80GB_fp16"],
         interconnect_module_dict["NVLinkV3_FC_4"],
     ),
-    "TPUv3_8": System(device_dict["TPUv3"], interconnect_module_dict["TPUv3Link_8"])    
+    "A100_4_fp16_HBF": System(
+        device_dict["A100_80GB_fp16_HBF"],
+        interconnect_module_dict["NVLinkV3_FC_4"],
+    ),
+    "TPUv3_8": System(device_dict["TPUv3"], interconnect_module_dict["TPUv3Link_8"]),
 }

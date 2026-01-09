@@ -21,6 +21,11 @@ device_dict = {
         IO_module_dict["A100"],
         memory_module_dict["A100_80GB"],
     ),
+    "A100_80GB_fp16_HBF": Device(
+        compute_module_dict["A100_fp16"],
+        IO_module_dict["A100_HBF"],
+        memory_module_dict["A100_80GB"],
+    ),
     "TPUv3": Device(
         compute_module_dict["TPUv3_bf16"],
         IO_module_dict["TPUv3"],

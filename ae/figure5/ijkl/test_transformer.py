@@ -11,6 +11,7 @@ if __name__ == "__main__":
     parser.add_argument("--init", action="store_true", help="initial computation")
     parser.add_argument("--gpu", action="store_true", help="Enable GPU")
     parser.add_argument("--simgpu", action="store_true", help="Enable simulation")
+    parser.add_argument("--simgpu-hbf", action="store_true", help="Enable simulation")
     parser.add_argument("--simtpu", action="store_true", help="Enable simulation")
     parser.add_argument("--roofline", action="store_true", help="use roofline")
     args = parser.parse_args()
@@ -37,6 +38,24 @@ if __name__ == "__main__":
             else:
                 model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
                 file_name = "transformer_A100_sim.csv"
+        if args.simgpu_hbf:
+            model = TransformerBlockInitComputationTP(
+                d_model=12288,
+                n_heads=96,
+                device_count=4,
+                data_type=data_type_dict["fp16"],
+            )
+            A100_system = system_dict["A100_4_fp16_HBF"]
+            # from design_space_exploration.dse import read_architecture_template, template_to_system
+            # arch_specs = read_architecture_template("configs/template.json")
+            # A100_system = template_to_system(arch_specs)
+            _ = model(Tensor([bs, s, 12288], data_type_dict["fp16"]))
+            if args.roofline:
+                model.roofline_model(A100_system)
+                file_name = "transformer_A100_HBF_roofline.csv"
+            else:
+                model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
+                file_name = "transformer_A100_HBF_sim_HBF.csv"
         if args.simtpu:
             model = TransformerBlockInitComputationTP(
                 d_model=12288,
@@ -81,6 +100,24 @@ if __name__ == "__main__":
             else:
                 model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
                 file_name = "transformerAR_A100_sim.csv"
+        if args.simgpu_hbf:
+            print("Simulating on A100 HBF")
+            model = TransformerBlockAutoRegressionTP(
+                d_model=12288,
+                n_heads=96,
+                device_count=4,
+                data_type=data_type_dict["fp16"],
+            )
+            A100_system = system_dict["A100_4_fp16_HBF"]
+            _ = model(
+                Tensor([bs, 1, 12288], data_type_dict["fp16"]), s + output_token_length
+            )
+            if args.roofline:
+                model.roofline_model(A100_system)
+                file_name = "transformerAR_A100_HBF_roofline.csv"
+            else:
+                model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
+                file_name = "transformerAR_A100_HBF_sim.csv"
         if args.simtpu:
             model = TransformerBlockAutoRegressionTP(
                 d_model=12288,
