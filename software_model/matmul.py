@@ -165,7 +165,7 @@ class Matmul(Operator):
 
     def print_latency(self):
         print(
-            f"{self.computational_graph.M}, {self.computational_graph.N}, {self.computational_graph.K}, {self.best_latency*1e3:.4f}ms, {self.latency_on_gpu*1e3:.4f}ms, {self.best_latency/self.latency_on_gpu*100:.2f}%",
+            f"{self.computational_graph.M}, {self.computational_graph.N}, {self.computational_graph.K}, {self.best_latency * 1e3:.4f}ms, {self.latency_on_gpu * 1e3:.4f}ms, {self.best_latency / self.latency_on_gpu * 100:.2f}%",
             flush=True,
         )
 
@@ -248,7 +248,7 @@ class Matmul(Operator):
             self.dataflow = dataflow
 
         def display(self):
-            print(f'{"-"*10} Mapping {"-"*10}')
+            print(f"{'-' * 10} Mapping {'-' * 10}")
             print(
                 f"l2_tile_M: {self.l2_tile_M}, l2_tile_N: {self.l2_tile_N}, l2_tile_K: {self.l2_tile_K}, is_l2_double_buffering: {self.is_l2_double_buffering}, l2_loop_order: {self.l2_loop_order}"
             )
@@ -296,9 +296,9 @@ class Matmul(Operator):
                 / pcb_module.compute_module.core_count
                 / pcb_module.compute_module.clock_freq
             )
-            self.latency = max(
-                compute_latency, io_latency
-            )  # + pcb_module.io_module.latency * 2
+            self.latency = (
+                max(compute_latency, io_latency) + pcb_module.io_module.latency * 2
+            )
             return self.latency
         if compile_mode == "exhaustive":
             for l2_tile_M_log2 in range(5, ceil(log2(self.computational_graph.M)) + 1):
@@ -403,7 +403,6 @@ class Matmul(Operator):
                     l2_tile_M * 8,
                     l2_tile_M * 16,
                     l2_tile_M * 32,
-                    
                 ]:
                     l2_tile_K_max = (
                         pcb_module.compute_module.l2_size
@@ -965,9 +964,9 @@ class Matmul(Operator):
         if previous_k > 0:
             total_cycle_count += ceil(l2_tiles[-1, -1, -1].K_reduction_cycle_count)
 
-        return total_cycle_count #+ ceil(
-        # pcb_module.io_module.latency * 2 * pcb_module.compute_module.clock_freq
-        # )
+        return total_cycle_count + ceil(
+            pcb_module.io_module.latency * 2 * pcb_module.compute_module.clock_freq
+        )
 
     class L2TileSimulator:
         def __init__(
