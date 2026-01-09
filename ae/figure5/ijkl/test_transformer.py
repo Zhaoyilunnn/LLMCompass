@@ -14,6 +14,11 @@ if __name__ == "__main__":
     parser.add_argument("--simgpu-hbf", action="store_true", help="Enable simulation")
     parser.add_argument("--simtpu", action="store_true", help="Enable simulation")
     parser.add_argument("--roofline", action="store_true", help="use roofline")
+    parser.add_argument(
+        "--exclude-fixed-latency",
+        action="store_true",
+        help="Exclude fixed IO latency overheads",
+    )
     args = parser.parse_args()
 
     bs = 8
@@ -39,7 +44,7 @@ if __name__ == "__main__":
                 model.compile_and_simulate(
                     A100_system,
                     compile_mode="heuristic-GPU",
-                    include_fixed_io_latency=args.include_fixed_latency,
+                    include_fixed_io_latency=(not args.exclude_fixed_latency),
                 )
                 file_name = "transformer_A100_sim.csv"
 
@@ -59,7 +64,11 @@ if __name__ == "__main__":
                 model.roofline_model(A100_system)
                 file_name = "transformer_A100_HBF_roofline.csv"
             else:
-                model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
+                model.compile_and_simulate(
+                    A100_system,
+                    compile_mode="heuristic-GPU",
+                    include_fixed_io_latency=(not args.exclude_fixed_latency),
+                )
                 file_name = "transformer_A100_HBF_sim_HBF.csv"
         if args.simtpu:
             model = TransformerBlockInitComputationTP(
@@ -103,7 +112,11 @@ if __name__ == "__main__":
                 model.roofline_model(A100_system)
                 file_name = "transformerAR_A100_roofline.csv"
             else:
-                model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
+                model.compile_and_simulate(
+                    A100_system,
+                    compile_mode="heuristic-GPU",
+                    include_fixed_io_latency=(not args.exclude_fixed_latency),
+                )
                 file_name = "transformerAR_A100_sim.csv"
         if args.simgpu_hbf:
             print("Simulating on A100 HBF")
@@ -121,7 +134,11 @@ if __name__ == "__main__":
                 model.roofline_model(A100_system)
                 file_name = "transformerAR_A100_HBF_roofline.csv"
             else:
-                model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
+                model.compile_and_simulate(
+                    A100_system,
+                    compile_mode="heuristic-GPU",
+                    include_fixed_io_latency=(not args.exclude_fixed_latency),
+                )
                 file_name = "transformerAR_A100_HBF_sim.csv"
         if args.simtpu:
             model = TransformerBlockAutoRegressionTP(
