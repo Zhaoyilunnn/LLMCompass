@@ -191,9 +191,25 @@ class TransformerBlockInitComputationTP(Operator):
         )
         return self.roofline_latency
 
-    def compile_and_simulate(self, system: System, compile_mode: str):
+    def compile_and_simulate(
+        self, system: System, compile_mode: str, include_fixed_io_latency: bool = False
+    ):
         device = system.device
         interconnect = system.interconnect
+
+        # propagate option to sub-operators that use IO fixed latency
+        for op in [
+            self.Q_proj,
+            self.K_proj,
+            self.V_proj,
+            self.Q_mul_K,
+            self.A_mul_V,
+            self.H_matmul0,
+            self.H_matmul1,
+            self.H_matmul2,
+        ]:
+            if hasattr(op, "include_fixed_io_latency"):
+                op.include_fixed_io_latency = include_fixed_io_latency
 
         # matmul
         print("simulating qkv")
@@ -548,9 +564,25 @@ class TransformerBlockAutoRegressionTP(Operator):
         self.roofline_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {layernorm_latency}, {layernorm_latency}, {gelu_latency}, {allreduce_latency}, {allreduce_latency}"
         return self.roofline_latency
 
-    def compile_and_simulate(self, system: System, compile_mode: str):
+    def compile_and_simulate(
+        self, system: System, compile_mode: str, include_fixed_io_latency: bool = False
+    ):
         pcb = system.device
         interconnect = system.interconnect
+
+        # propagate option to sub-operators that use IO fixed latency
+        for op in [
+            self.Q_proj,
+            self.K_proj,
+            self.V_proj,
+            self.Q_mul_K,
+            self.A_mul_V,
+            self.H_matmul0,
+            self.H_matmul1,
+            self.H_matmul2,
+        ]:
+            if hasattr(op, "include_fixed_io_latency"):
+                op.include_fixed_io_latency = include_fixed_io_latency
 
         # matmul
         # print("simulating qkv")

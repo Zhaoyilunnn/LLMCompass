@@ -36,8 +36,13 @@ if __name__ == "__main__":
                 model.roofline_model(A100_system)
                 file_name = "transformer_A100_roofline.csv"
             else:
-                model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
+                model.compile_and_simulate(
+                    A100_system,
+                    compile_mode="heuristic-GPU",
+                    include_fixed_io_latency=args.include_fixed_latency,
+                )
                 file_name = "transformer_A100_sim.csv"
+
         if args.simgpu_hbf:
             model = TransformerBlockInitComputationTP(
                 d_model=12288,

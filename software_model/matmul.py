@@ -127,6 +127,7 @@ class Matmul(Operator):
         self.output_shape = None
         self.look_up_table = None
         self.best_mapping = None
+        self.include_fixed_io_latency = False
 
     def __call__(self, input1: Tensor, input2: Tensor) -> Tensor:
         # [bs, M, K] * [K, N] = [bs, M, N]
@@ -296,9 +297,13 @@ class Matmul(Operator):
                 / pcb_module.compute_module.core_count
                 / pcb_module.compute_module.clock_freq
             )
-            self.latency = (
-                max(compute_latency, io_latency) + pcb_module.io_module.latency * 2
-            )
+            base_latency = max(compute_latency, io_latency)
+            if (
+                hasattr(self, "include_fixed_io_latency")
+                and self.include_fixed_io_latency
+            ):
+                base_latency += pcb_module.io_module.latency * 2
+            self.latency = base_latency
             return self.latency
         if compile_mode == "exhaustive":
             for l2_tile_M_log2 in range(5, ceil(log2(self.computational_graph.M)) + 1):
@@ -964,9 +969,13 @@ class Matmul(Operator):
         if previous_k > 0:
             total_cycle_count += ceil(l2_tiles[-1, -1, -1].K_reduction_cycle_count)
 
-        return total_cycle_count + ceil(
-            pcb_module.io_module.latency * 2 * pcb_module.compute_module.clock_freq
-        )
+        # Optionally include fixed IO latency as cycles converted from seconds
+        if hasattr(self, "include_fixed_io_latency") and self.include_fixed_io_latency:
+            return total_cycle_count + ceil(
+                pcb_module.io_module.latency * 2 * pcb_module.compute_module.clock_freq
+            )
+        else:
+            return total_cycle_count
 
     class L2TileSimulator:
         def __init__(
