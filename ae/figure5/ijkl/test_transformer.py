@@ -46,7 +46,11 @@ if __name__ == "__main__":
                     compile_mode="heuristic-GPU",
                     include_fixed_io_latency=(not args.exclude_fixed_latency),
                 )
-                file_name = "transformer_A100_sim.csv"
+                file_name = (
+                    "transformer_A100_sim_excl.csv"
+                    if args.exclude_fixed_latency
+                    else "transformer_A100_sim.csv"
+                )
 
         if args.simgpu_hbf:
             model = TransformerBlockInitComputationTP(
@@ -69,7 +73,11 @@ if __name__ == "__main__":
                     compile_mode="heuristic-GPU",
                     include_fixed_io_latency=(not args.exclude_fixed_latency),
                 )
-                file_name = "transformer_A100_HBF_sim_HBF.csv"
+                file_name = (
+                    "transformer_A100_HBF_sim_HBF_excl.csv"
+                    if args.exclude_fixed_latency
+                    else "transformer_A100_HBF_sim_HBF.csv"
+                )
         if args.simtpu:
             model = TransformerBlockInitComputationTP(
                 d_model=12288,
@@ -117,7 +125,11 @@ if __name__ == "__main__":
                     compile_mode="heuristic-GPU",
                     include_fixed_io_latency=(not args.exclude_fixed_latency),
                 )
-                file_name = "transformerAR_A100_sim.csv"
+                file_name = (
+                    "transformerAR_A100_sim_excl.csv"
+                    if args.exclude_fixed_latency
+                    else "transformerAR_A100_sim.csv"
+                )
         if args.simgpu_hbf:
             print("Simulating on A100 HBF")
             model = TransformerBlockAutoRegressionTP(
@@ -139,7 +151,11 @@ if __name__ == "__main__":
                     compile_mode="heuristic-GPU",
                     include_fixed_io_latency=(not args.exclude_fixed_latency),
                 )
-                file_name = "transformerAR_A100_HBF_sim.csv"
+                file_name = (
+                    "transformerAR_A100_HBF_sim_excl.csv"
+                    if args.exclude_fixed_latency
+                    else "transformerAR_A100_HBF_sim.csv"
+                )
         if args.simtpu:
             model = TransformerBlockAutoRegressionTP(
                 d_model=12288,
