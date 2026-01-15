@@ -55,7 +55,7 @@ plt.figure(figsize=(4.8, 2.8))
 # A100-excl
 bottom = 0
 for i, (category, value) in enumerate(zip(categories, values_a100_excl)):
-    plt.bar(1, value, bottom=bottom, color=colors[i], width=0.5)
+    plt.bar(1, value, bottom=bottom, color=colors[i], width=0.5, label=category)
     bottom += value
 sum_a100_excl = bottom
 
@@ -82,6 +82,8 @@ print(
 
 plt.ylabel("Latency (s)")
 plt.xticks([1, 2, 3], ["A100\n(excl)", "A100", "A100-HBF"])
+handles, labels = plt.gca().get_legend_handles_labels()
+plt.legend(handles[::-1], labels[::-1], loc="upper left", bbox_to_anchor=(1, 1.05))
 plt.tight_layout()
 plt.savefig("figure5i_hbf_compare.pdf", bbox_inches="tight", pad_inches=0.01, dpi=300)
 
@@ -113,7 +115,7 @@ plt.figure(figsize=(4.8, 2.8))
 bottom = 0
 for i, (category, value) in enumerate(zip(categories, values_ar_a100_excl)):
     value_ms = value * 1e3
-    plt.bar(1, value_ms, bottom=bottom, color=colors[i], width=0.5)
+    plt.bar(1, value_ms, bottom=bottom, color=colors[i], width=0.5, label=category)
     bottom += value_ms
 sum_ar_a100_excl = bottom
 
@@ -142,5 +144,7 @@ print(
 
 plt.ylabel("Latency (ms)")
 plt.xticks([1, 2, 3], ["A100\n(excl)", "A100", "A100-HBF"])
+handles, labels = plt.gca().get_legend_handles_labels()
+plt.legend(handles[::-1], labels[::-1], loc="upper left", bbox_to_anchor=(1, 1.05))
 plt.tight_layout()
 plt.savefig("figure5k_hbf_compare.pdf", bbox_inches="tight", pad_inches=0.01, dpi=300)
