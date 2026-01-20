@@ -19,6 +19,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Exclude fixed IO latency overheads",
     )
+    parser.add_argument(
+        "--bandwidth",
+        type=float,
+        default=None,
+        help="Override IO bandwidth (B/s) for A100_HBF systems",
+    )
     args = parser.parse_args()
 
     bs = 8
@@ -64,9 +70,16 @@ if __name__ == "__main__":
             # arch_specs = read_architecture_template("configs/template.json")
             # A100_system = template_to_system(arch_specs)
             _ = model(Tensor([bs, s, 12288], data_type_dict["fp16"]))
+            if args.bandwidth is not None:
+                A100_system.device.io_module.bandwidth = args.bandwidth
+            bw_tag = (
+                f"_bw{int(args.bandwidth / 1e9)}GBs"
+                if args.bandwidth is not None
+                else ""
+            )
             if args.roofline:
                 model.roofline_model(A100_system)
-                file_name = "transformer_A100_HBF_roofline.csv"
+                file_name = f"transformer_A100_HBF_roofline{bw_tag}.csv"
             else:
                 model.compile_and_simulate(
                     A100_system,
@@ -74,9 +87,9 @@ if __name__ == "__main__":
                     include_fixed_io_latency=(not args.exclude_fixed_latency),
                 )
                 file_name = (
-                    "transformer_A100_HBF_sim_HBF_excl.csv"
+                    f"transformer_A100_HBF_sim_HBF_excl{bw_tag}.csv"
                     if args.exclude_fixed_latency
-                    else "transformer_A100_HBF_sim_HBF.csv"
+                    else f"transformer_A100_HBF_sim_HBF{bw_tag}.csv"
                 )
         if args.simtpu:
             model = TransformerBlockInitComputationTP(
@@ -142,9 +155,16 @@ if __name__ == "__main__":
             _ = model(
                 Tensor([bs, 1, 12288], data_type_dict["fp16"]), s + output_token_length
             )
+            if args.bandwidth is not None:
+                A100_system.device.io_module.bandwidth = args.bandwidth
+            bw_tag = (
+                f"_bw{int(args.bandwidth / 1e9)}GBs"
+                if args.bandwidth is not None
+                else ""
+            )
             if args.roofline:
                 model.roofline_model(A100_system)
-                file_name = "transformerAR_A100_HBF_roofline.csv"
+                file_name = f"transformerAR_A100_HBF_roofline{bw_tag}.csv"
             else:
                 model.compile_and_simulate(
                     A100_system,
@@ -152,9 +172,9 @@ if __name__ == "__main__":
                     include_fixed_io_latency=(not args.exclude_fixed_latency),
                 )
                 file_name = (
-                    "transformerAR_A100_HBF_sim_excl.csv"
+                    f"transformerAR_A100_HBF_sim_excl{bw_tag}.csv"
                     if args.exclude_fixed_latency
-                    else "transformerAR_A100_HBF_sim.csv"
+                    else f"transformerAR_A100_HBF_sim{bw_tag}.csv"
                 )
         if args.simtpu:
             model = TransformerBlockAutoRegressionTP(
