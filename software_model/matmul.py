@@ -128,6 +128,7 @@ class Matmul(Operator):
         self.look_up_table = None
         self.best_mapping = None
         self.include_fixed_io_latency = False
+        self.fixed_io_write_coeff = 1.0
 
     def __call__(self, input1: Tensor, input2: Tensor) -> Tensor:
         # [bs, M, K] * [K, N] = [bs, M, N]
@@ -302,7 +303,8 @@ class Matmul(Operator):
                 hasattr(self, "include_fixed_io_latency")
                 and self.include_fixed_io_latency
             ):
-                base_latency += pcb_module.io_module.latency * 2
+                write_coeff = getattr(self, "fixed_io_write_coeff", 1.0)
+                base_latency += pcb_module.io_module.latency * (1.0 + write_coeff)
             self.latency = base_latency
             return self.latency
         if compile_mode == "exhaustive":
@@ -971,8 +973,10 @@ class Matmul(Operator):
 
         # Optionally include fixed IO latency as cycles converted from seconds
         if hasattr(self, "include_fixed_io_latency") and self.include_fixed_io_latency:
+            write_coeff = getattr(self, "fixed_io_write_coeff", 1.0)
+            total_fixed_latency = pcb_module.io_module.latency * (1.0 + write_coeff)
             return total_cycle_count + ceil(
-                pcb_module.io_module.latency * 2 * pcb_module.compute_module.clock_freq
+                total_fixed_latency * pcb_module.compute_module.clock_freq
             )
         else:
             return total_cycle_count

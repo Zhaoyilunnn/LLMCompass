@@ -192,7 +192,11 @@ class TransformerBlockInitComputationTP(Operator):
         return self.roofline_latency
 
     def compile_and_simulate(
-        self, system: System, compile_mode: str, include_fixed_io_latency: bool = False
+        self,
+        system: System,
+        compile_mode: str,
+        include_fixed_io_latency: bool = False,
+        fixed_io_write_coeff: float = 1.0,
     ):
         device = system.device
         interconnect = system.interconnect
@@ -210,6 +214,8 @@ class TransformerBlockInitComputationTP(Operator):
         ]:
             if hasattr(op, "include_fixed_io_latency"):
                 op.include_fixed_io_latency = include_fixed_io_latency
+            if hasattr(op, "fixed_io_write_coeff"):
+                op.fixed_io_write_coeff = fixed_io_write_coeff
 
         # matmul
         print("simulating qkv")
@@ -565,7 +571,11 @@ class TransformerBlockAutoRegressionTP(Operator):
         return self.roofline_latency
 
     def compile_and_simulate(
-        self, system: System, compile_mode: str, include_fixed_io_latency: bool = False
+        self,
+        system: System,
+        compile_mode: str,
+        include_fixed_io_latency: bool = False,
+        fixed_io_write_coeff: float = 1.0,
     ):
         pcb = system.device
         interconnect = system.interconnect
@@ -583,6 +593,8 @@ class TransformerBlockAutoRegressionTP(Operator):
         ]:
             if hasattr(op, "include_fixed_io_latency"):
                 op.include_fixed_io_latency = include_fixed_io_latency
+            if hasattr(op, "fixed_io_write_coeff"):
+                op.fixed_io_write_coeff = fixed_io_write_coeff
 
         # matmul
         # print("simulating qkv")
