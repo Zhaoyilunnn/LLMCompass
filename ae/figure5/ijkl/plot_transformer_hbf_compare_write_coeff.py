@@ -81,12 +81,12 @@ print(
 )
 
 plt.ylabel("Latency (s)")
-plt.xticks([1, 2, 3], ["A100\n(excl)", "A100", "A100-HBF\n(coeff=20)"])
+plt.xticks([1, 2, 3], ["A100\n(excl)", "A100", "A100-HBF"])
 handles, labels = plt.gca().get_legend_handles_labels()
 plt.legend(handles[::-1], labels[::-1], loc="upper left", bbox_to_anchor=(1, 1.05))
 plt.tight_layout()
 plt.savefig(
-    "figure5i_hbf_compare_coeff20.pdf", bbox_inches="tight", pad_inches=0.01, dpi=300
+    "figure5i_hbf_compare_coeff20.svg", bbox_inches="tight", pad_inches=0.01, dpi=300
 )
 
 # -------- Autoregression --------
@@ -148,10 +148,10 @@ print(
 )
 
 plt.ylabel("Latency (ms)")
-plt.xticks([1, 2, 3], ["A100\n(excl)", "A100", "A100-HBF\n(coeff=20)"])
+plt.xticks([1, 2, 3], ["A100\n(excl)", "A100", "A100-HBF"])
 handles, labels = plt.gca().get_legend_handles_labels()
 plt.legend(handles[::-1], labels[::-1], loc="upper left", bbox_to_anchor=(1, 1.05))
 plt.tight_layout()
 plt.savefig(
-    "figure5k_hbf_compare_coeff20.pdf", bbox_inches="tight", pad_inches=0.01, dpi=300
+    "figure5k_hbf_compare_coeff20.svg", bbox_inches="tight", pad_inches=0.01, dpi=300
 )
