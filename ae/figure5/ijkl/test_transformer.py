@@ -31,10 +31,18 @@ if __name__ == "__main__":
         default=1.0,
         help="Coefficient x for write-side fixed IO latency (total fixed IO = read + x * read)",
     )
+    parser.add_argument(
+        "--seq-len",
+        type=int,
+        default=None,
+        help="Sequence length s used for transformer inputs (default: 2048)",
+    )
     args = parser.parse_args()
 
     bs = 8
-    s = 2048
+    s = 2048 if args.seq_len is None else args.seq_len
+    seq_len_tag = "" if args.seq_len is None else f"_seq{args.seq_len}"
+
     if args.init:
         print("Initial computation")
         if args.simgpu:
@@ -51,7 +59,7 @@ if __name__ == "__main__":
             _ = model(Tensor([bs, s, 12288], data_type_dict["fp16"]))
             if args.roofline:
                 model.roofline_model(A100_system)
-                file_name = "transformer_A100_roofline.csv"
+                file_name = f"transformer_A100_roofline{seq_len_tag}.csv"
             else:
                 model.compile_and_simulate(
                     A100_system,
@@ -59,9 +67,9 @@ if __name__ == "__main__":
                     include_fixed_io_latency=(not args.exclude_fixed_latency),
                 )
                 file_name = (
-                    "transformer_A100_sim_excl.csv"
+                    f"transformer_A100_sim_excl{seq_len_tag}.csv"
                     if args.exclude_fixed_latency
-                    else "transformer_A100_sim.csv"
+                    else f"transformer_A100_sim{seq_len_tag}.csv"
                 )
 
         if args.simgpu_hbf:
@@ -90,7 +98,9 @@ if __name__ == "__main__":
             )
             if args.roofline:
                 model.roofline_model(A100_system)
-                file_name = f"transformer_A100_HBF_roofline{bw_tag}{coeff_tag}.csv"
+                file_name = (
+                    f"transformer_A100_HBF_roofline{bw_tag}{coeff_tag}{seq_len_tag}.csv"
+                )
             else:
                 model.compile_and_simulate(
                     A100_system,
@@ -99,9 +109,9 @@ if __name__ == "__main__":
                     fixed_io_write_coeff=args.fixed_io_write_coeff,
                 )
                 file_name = (
-                    f"transformer_A100_HBF_sim_HBF_excl{bw_tag}{coeff_tag}.csv"
+                    f"transformer_A100_HBF_sim_HBF_excl{bw_tag}{coeff_tag}{seq_len_tag}.csv"
                     if args.exclude_fixed_latency
-                    else f"transformer_A100_HBF_sim_HBF{bw_tag}{coeff_tag}.csv"
+                    else f"transformer_A100_HBF_sim_HBF{bw_tag}{coeff_tag}{seq_len_tag}.csv"
                 )
         if args.simtpu:
             model = TransformerBlockInitComputationTP(
@@ -143,7 +153,7 @@ if __name__ == "__main__":
             )
             if args.roofline:
                 model.roofline_model(A100_system)
-                file_name = "transformerAR_A100_roofline.csv"
+                file_name = f"transformerAR_A100_roofline{seq_len_tag}.csv"
             else:
                 model.compile_and_simulate(
                     A100_system,
@@ -151,9 +161,9 @@ if __name__ == "__main__":
                     include_fixed_io_latency=(not args.exclude_fixed_latency),
                 )
                 file_name = (
-                    "transformerAR_A100_sim_excl.csv"
+                    f"transformerAR_A100_sim_excl{seq_len_tag}.csv"
                     if args.exclude_fixed_latency
-                    else "transformerAR_A100_sim.csv"
+                    else f"transformerAR_A100_sim{seq_len_tag}.csv"
                 )
         if args.simgpu_hbf:
             print("Simulating on A100 HBF")
@@ -181,7 +191,7 @@ if __name__ == "__main__":
             )
             if args.roofline:
                 model.roofline_model(A100_system)
-                file_name = f"transformerAR_A100_HBF_roofline{bw_tag}{coeff_tag}.csv"
+                file_name = f"transformerAR_A100_HBF_roofline{bw_tag}{coeff_tag}{seq_len_tag}.csv"
             else:
                 model.compile_and_simulate(
                     A100_system,
@@ -190,9 +200,9 @@ if __name__ == "__main__":
                     fixed_io_write_coeff=args.fixed_io_write_coeff,
                 )
                 file_name = (
-                    f"transformerAR_A100_HBF_sim_excl{bw_tag}{coeff_tag}.csv"
+                    f"transformerAR_A100_HBF_sim_excl{bw_tag}{coeff_tag}{seq_len_tag}.csv"
                     if args.exclude_fixed_latency
-                    else f"transformerAR_A100_HBF_sim{bw_tag}{coeff_tag}.csv"
+                    else f"transformerAR_A100_HBF_sim{bw_tag}{coeff_tag}{seq_len_tag}.csv"
                 )
         if args.simtpu:
             model = TransformerBlockAutoRegressionTP(
