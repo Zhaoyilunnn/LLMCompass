@@ -32,6 +32,12 @@ if __name__ == "__main__":
         help="Coefficient x for write-side fixed IO latency (total fixed IO = read + x * read)",
     )
     parser.add_argument(
+        "--fixed-latency",
+        type=float,
+        default=None,
+        help="Override IO fixed latency (s) for A100_HBF systems",
+    )
+    parser.add_argument(
         "--seq-len",
         type=int,
         default=None,
@@ -86,6 +92,8 @@ if __name__ == "__main__":
             _ = model(Tensor([bs, s, 12288], data_type_dict["fp16"]))
             if args.bandwidth is not None:
                 A100_system.device.io_module.bandwidth = args.bandwidth
+            if args.fixed_latency is not None:
+                A100_system.device.io_module.latency = args.fixed_latency
             bw_tag = (
                 f"_bw{int(args.bandwidth / 1e9)}GBs"
                 if args.bandwidth is not None
@@ -96,11 +104,12 @@ if __name__ == "__main__":
                 if args.fixed_io_write_coeff != 1.0
                 else ""
             )
+            latency_tag = (
+                f"_lat{args.fixed_latency:g}" if args.fixed_latency is not None else ""
+            )
             if args.roofline:
                 model.roofline_model(A100_system)
-                file_name = (
-                    f"transformer_A100_HBF_roofline{bw_tag}{coeff_tag}{seq_len_tag}.csv"
-                )
+                file_name = f"transformer_A100_HBF_roofline{bw_tag}{coeff_tag}{latency_tag}{seq_len_tag}.csv"
             else:
                 model.compile_and_simulate(
                     A100_system,
@@ -109,9 +118,9 @@ if __name__ == "__main__":
                     fixed_io_write_coeff=args.fixed_io_write_coeff,
                 )
                 file_name = (
-                    f"transformer_A100_HBF_sim_HBF_excl{bw_tag}{coeff_tag}{seq_len_tag}.csv"
+                    f"transformer_A100_HBF_sim_HBF_excl{bw_tag}{coeff_tag}{latency_tag}{seq_len_tag}.csv"
                     if args.exclude_fixed_latency
-                    else f"transformer_A100_HBF_sim_HBF{bw_tag}{coeff_tag}{seq_len_tag}.csv"
+                    else f"transformer_A100_HBF_sim_HBF{bw_tag}{coeff_tag}{latency_tag}{seq_len_tag}.csv"
                 )
         if args.simtpu:
             model = TransformerBlockInitComputationTP(
@@ -179,6 +188,8 @@ if __name__ == "__main__":
             )
             if args.bandwidth is not None:
                 A100_system.device.io_module.bandwidth = args.bandwidth
+            if args.fixed_latency is not None:
+                A100_system.device.io_module.latency = args.fixed_latency
             bw_tag = (
                 f"_bw{int(args.bandwidth / 1e9)}GBs"
                 if args.bandwidth is not None
@@ -189,9 +200,12 @@ if __name__ == "__main__":
                 if args.fixed_io_write_coeff != 1.0
                 else ""
             )
+            latency_tag = (
+                f"_lat{args.fixed_latency:g}" if args.fixed_latency is not None else ""
+            )
             if args.roofline:
                 model.roofline_model(A100_system)
-                file_name = f"transformerAR_A100_HBF_roofline{bw_tag}{coeff_tag}{seq_len_tag}.csv"
+                file_name = f"transformerAR_A100_HBF_roofline{bw_tag}{coeff_tag}{latency_tag}{seq_len_tag}.csv"
             else:
                 model.compile_and_simulate(
                     A100_system,
@@ -200,9 +214,9 @@ if __name__ == "__main__":
                     fixed_io_write_coeff=args.fixed_io_write_coeff,
                 )
                 file_name = (
-                    f"transformerAR_A100_HBF_sim_excl{bw_tag}{coeff_tag}{seq_len_tag}.csv"
+                    f"transformerAR_A100_HBF_sim_excl{bw_tag}{coeff_tag}{latency_tag}{seq_len_tag}.csv"
                     if args.exclude_fixed_latency
-                    else f"transformerAR_A100_HBF_sim{bw_tag}{coeff_tag}{seq_len_tag}.csv"
+                    else f"transformerAR_A100_HBF_sim{bw_tag}{coeff_tag}{latency_tag}{seq_len_tag}.csv"
                 )
         if args.simtpu:
             model = TransformerBlockAutoRegressionTP(
