@@ -14,7 +14,7 @@ This repository provides the implementation of **LLMCompass** from the following
 ```
 $ conda create -n llmcompass_ae python=3.9
 $ conda activate llmcompass_ae
-$ pip3 install scalesim
+$ pip3 install scalesim==2.0.2 numpy==1.26.0
 $ conda install pytorch==2.0.0 -c pytorch
 $ pip3 install matplotlib
 $ pip3 install seaborn
