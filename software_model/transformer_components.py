@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from software_model.operators import Operator, Reshape, Concat, Transpose
 from software_model.matmul import Matmul, BatchedMatmul
@@ -34,7 +35,7 @@ class BaseTPAttentionStage(Operator):
 
 
 class TPInitStageMHA(BaseTPAttentionStage):
-    """Tensor-parallel self-attention stage for initialization workloads."""
+    """Tensor-parallel MHA stage for initialization workloads."""
 
     def __init__(
         self,
@@ -232,13 +233,7 @@ class TPInitStageMHA(BaseTPAttentionStage):
 
 
 class TPAutoregStageMHA(BaseTPAttentionStage):
-    """Self-attention stage with KV cache support for generation workloads.
-
-    Optionally models grouped-query attention (GQA) via ``num_kv_heads``. When
-    ``num_kv_heads`` is provided and smaller than ``n_heads``, the compute
-    structure stays the same but the key/value cache memory requirement can be
-    scaled accordingly.
-    """
+    """Standard MHA attention with KV cache for generation workloads."""
 
     def __init__(
         self,
@@ -248,23 +243,10 @@ class TPAutoregStageMHA(BaseTPAttentionStage):
         data_type: DataType,
         *,
         use_allreduce: bool = True,
-        num_kv_heads: int | None = None,
-    ):
+    ) -> None:
         super().__init__(
             d_model, n_heads, device_count, data_type, use_allreduce=use_allreduce
         )
-
-        if num_kv_heads is not None:
-            if num_kv_heads <= 0 or num_kv_heads > n_heads:
-                raise ValueError("num_kv_heads must be in (0, num_heads]")
-            if n_heads % num_kv_heads != 0:
-                raise ValueError("num_heads must be divisible by num_kv_heads")
-            if num_kv_heads % device_count != 0:
-                raise ValueError("num_kv_heads must be divisible by device_count")
-            self.num_kv_heads = num_kv_heads
-        else:
-            # Default: standard MHA (KV heads == query heads).
-            self.num_kv_heads = n_heads
 
         d = d_model
         self.Wq = Tensor([d, d // device_count], data_type)
@@ -292,16 +274,14 @@ class TPAutoregStageMHA(BaseTPAttentionStage):
         self.layer_norm0 = LayerNorm(data_type)
         self.allreduce_mha = AllReduceMultiPCB(data_type)
 
-    def __call__(self, x: Tensor, seq_len: int) -> Tensor:
+    def __call__(self, x: Tensor, seq_len: int) -> Tensor:  # type: ignore[override]
         b, _, d = x.shape
         assert d == self.d_model
         h = self.n_heads
         dev_cnt = self.device_count
         d_h = d // h
 
-        # Cache tensors are shaped for the full per-head view used in the
-        # compute graph. We track the logical KV cache size separately via
-        # ``num_kv_heads`` in ``memory_requirement``.
+        # KV cache for full MHA heads per device.
         K_cache = Tensor([b, h // dev_cnt, d_h, seq_len], self.data_type)
         V_cache = Tensor([b, h // dev_cnt, seq_len, d_h], self.data_type)
 
@@ -327,22 +307,17 @@ class TPAutoregStageMHA(BaseTPAttentionStage):
         if dev_cnt > 1 and self.use_allreduce:
             h0 = self.allreduce_mha(h0)
 
-        # Logical KV cache memory: scale to the configured number of KV heads.
-        kv_heads_per_device = self.num_kv_heads // dev_cnt
-        logical_K_elems = b * kv_heads_per_device * d_h * seq_len
-        logical_V_elems = b * kv_heads_per_device * seq_len * d_h
-
         self.memory_requirement = (
             self.Wq.size * self.Wq.data_type.word_size
             + self.Wk.size * self.Wk.data_type.word_size
             + self.Wv.size * self.Wv.data_type.word_size
             + self.W0.size * self.W0.data_type.word_size
-            + logical_K_elems * self.data_type.word_size
-            + logical_V_elems * self.data_type.word_size
+            + K_cache.size * K_cache.data_type.word_size
+            + V_cache.size * V_cache.data_type.word_size
         )
         return h0
 
-    def roofline_model(self, system: System) -> float:
+    def roofline_model(self, system: System) -> float:  # type: ignore[override]
         device = system.device
         qkv_latency = 3 * (
             self.Q_proj.roofline_model(device) + device.compute_module.overhead.matmul
@@ -381,7 +356,7 @@ class TPAutoregStageMHA(BaseTPAttentionStage):
         self.roofline_latency = total
         return total
 
-    def compile_and_simulate(
+    def compile_and_simulate(  # type: ignore[override]
         self,
         system: System,
         compile_mode: str,
@@ -442,8 +417,569 @@ class TPAutoregStageMHA(BaseTPAttentionStage):
         self.latency = total
         return total
 
-    def run_on_gpu(self) -> float:
+    def run_on_gpu(self) -> float:  # type: ignore[override]
         qkv_latency = self.Q_proj.run_on_gpu() * 3
+        q_mul_k_latency = self.Q_mul_K.run_on_gpu()
+        a_mul_v_latency = self.A_mul_V.run_on_gpu()
+        h_matmul0_latency = self.H_matmul0.run_on_gpu()
+        softmax_latency = self.A_softmax.run_on_gpu()
+        layernorm_latency = self.layer_norm0.run_on_gpu()
+        total = (
+            qkv_latency
+            + q_mul_k_latency
+            + a_mul_v_latency
+            + h_matmul0_latency
+            + softmax_latency
+            + layernorm_latency
+        )
+        self.latency_on_gpu = total
+        return total
+
+
+class TPInitStageGQA(TPInitStageMHA):
+    """Init-stage GQA attention with explicit KV head grouping."""
+
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        device_count: int,
+        data_type: DataType,
+        *,
+        num_kv_heads: int,
+        use_allreduce: bool = True,
+    ) -> None:
+        if num_kv_heads <= 0 or num_kv_heads > n_heads:
+            raise ValueError("num_kv_heads must be in (0, num_heads]")
+        if n_heads % num_kv_heads != 0:
+            raise ValueError("num_heads must be divisible by num_kv_heads")
+        if num_kv_heads % device_count != 0:
+            raise ValueError("num_kv_heads must be divisible by device_count")
+
+        super().__init__(
+            d_model,
+            n_heads,
+            device_count,
+            data_type,
+            use_allreduce=use_allreduce,
+        )
+
+        self.num_kv_heads = num_kv_heads
+
+        # Override K/V weights to only produce num_kv_heads heads in total.
+        d = d_model
+        h = n_heads
+        dev_cnt = device_count
+        d_h = d // h
+        kv_heads_per_device = num_kv_heads // dev_cnt
+        kv_dim_per_device = kv_heads_per_device * d_h
+
+        # Q and output projection keep the same shape as MHA.
+        self.Wq = Tensor([d, d // dev_cnt], data_type)
+        self.W0 = Tensor([d // dev_cnt, d], data_type)
+
+        # K/V reduced to num_kv_heads.
+        self.Wk = Tensor([d, kv_dim_per_device], data_type)
+        self.Wv = Tensor([d, kv_dim_per_device], data_type)
+
+    def __call__(self, X: Tensor) -> Tensor:
+        b, s, d = X.shape
+        assert d == self.d_model
+        h = self.n_heads
+        dev_cnt = self.device_count
+        d_h = d // h
+
+        q_heads_per_device = h // dev_cnt
+        kv_heads_per_device = self.num_kv_heads // dev_cnt
+
+        if kv_heads_per_device == 0 or q_heads_per_device % kv_heads_per_device != 0:
+            raise ValueError("Invalid GQA configuration for given device_count")
+        group_size = q_heads_per_device // kv_heads_per_device
+
+        # Projections.
+        Q = self.Q_proj(X, self.Wq)  # [b, s, d/dev_cnt]
+        K = self.K_proj(X, self.Wk)  # [b, s, kv_heads_per_device * d_h]
+        V = self.V_proj(X, self.Wv)  # [b, s, kv_heads_per_device * d_h]
+
+        # === Q path ===
+        # [b, s, d/dev_cnt] -> [b, s, q_heads_per_device, d_h]
+        Q = self.Q_reshape(Q, [b, s, q_heads_per_device, d_h])
+        # -> [b, s, kv_heads_per_device, group_size, d_h]
+        Q = self.Q_reshape(Q, [b, s, kv_heads_per_device, group_size, d_h])
+        # -> [b, kv_heads_per_device, group_size, s, d_h]
+        Q = self.Q_transpose(Q, [0, 2, 3, 1, 4])
+        # -> [b * kv_heads_per_device, group_size, s, d_h]
+        Q = self.Q_reshape(Q, [b * kv_heads_per_device, group_size, s, d_h])
+        # Collapse (group, s) into the matmul M dimension: [b*kv, group*s, d_h]
+        Q_flat = self.Q_reshape(
+            Q,
+            [b * kv_heads_per_device, group_size * s, d_h],
+        )
+
+        # === K path ===
+        # [b, s, kv*d_h] -> [b, s, kv, d_h]
+        K = self.K_reshape(K, [b, s, kv_heads_per_device, d_h])
+        # -> [b, kv, s, d_h]
+        K = self.K_transpose(K, [0, 2, 1, 3])
+        # -> [b * kv, s, d_h]
+        K = self.K_reshape(K, [b * kv_heads_per_device, s, d_h])
+        # -> [b * kv, d_h, s]
+        K_T = self.K_transpose(K, [0, 2, 1])
+
+        # QK^T: [b*kv, group*s, d_h] x [b*kv, d_h, s] -> [b*kv, group*s, s]
+        A = self.Q_mul_K(Q_flat, K_T)
+
+        # Softmax over keys dimension.
+        A_prob = self.A_softmax(A)
+
+        # === V path ===
+        # [b, s, kv*d_h] -> [b, s, kv, d_h]
+        V = self.V_reshape(V, [b, s, kv_heads_per_device, d_h])
+        # -> [b, kv, s, d_h]
+        V = self.V_transpose(V, [0, 2, 1, 3])
+        # -> [b * kv, s, d_h]
+        V = self.V_reshape(V, [b * kv_heads_per_device, s, d_h])
+
+        # AV: [b*kv, group*s, s] x [b*kv, s, d_h] -> [b*kv, group*s, d_h]
+        H_flat = self.A_mul_V(A_prob, V)
+
+        # [b*kv, group*s, d_h] -> [b, kv, group, s, d_h]
+        H = self.H_reshape(
+            H_flat,
+            [b, kv_heads_per_device, group_size, s, d_h],
+        )
+        # -> [b, s, kv, group, d_h]
+        H = self.H_transpose(H, [0, 3, 1, 2, 4])
+        # -> [b, s, q_heads_per_device, d_h]
+        H = self.H_reshape(H, [b, s, q_heads_per_device, d_h])
+
+        # Collapse heads per device back to model dimension per device.
+        H = self.H_reshape(H, [b, s, d // dev_cnt])
+        H0 = self.H_matmul0(H, self.W0)
+        H0 = self.layer_norm0(H0)
+        if dev_cnt > 1 and self.use_allreduce:
+            H0 = self.allreduce_mha(H0)
+        return H0
+
+    # === performance ===
+    def roofline_model(self, system: System) -> float:  # type: ignore[override]
+        """Reuse MHA perf structure but account for reduced K/V dims.
+
+        Q/K/V matmuls have different shapes in GQA (K/V smaller), so we must
+        model them separately instead of assuming 3x Q cost.
+        """
+        device = system.device
+
+        q_latency = (
+            self.Q_proj.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        k_latency = (
+            self.K_proj.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        v_latency = (
+            self.V_proj.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        qkv_latency = q_latency + k_latency + v_latency
+
+        q_mul_k_latency = (
+            self.Q_mul_K.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        a_mul_v_latency = (
+            self.A_mul_V.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        h_matmul0_latency = (
+            self.H_matmul0.roofline_model(device)
+            + device.compute_module.overhead.matmul
+        )
+        softmax_latency = (
+            self.A_softmax.roofline_model(device)
+            + device.compute_module.overhead.softmax
+        )
+        layernorm_latency = (
+            self.layer_norm0.roofline_model(device)
+            + device.compute_module.overhead.layernorm
+        )
+
+        allreduce_latency = 0.0
+        if self.device_count > 1 and self.use_allreduce:
+            latency_val = self.allreduce_mha.simulate(system.interconnect)
+            allreduce_latency = float(latency_val) if latency_val is not None else 0.0
+
+        total = (
+            qkv_latency
+            + q_mul_k_latency
+            + a_mul_v_latency
+            + h_matmul0_latency
+            + softmax_latency
+            + layernorm_latency
+            + allreduce_latency
+        )
+        self.roofline_latency = total
+        return total
+
+    def compile_and_simulate(  # type: ignore[override]
+        self,
+        system: System,
+        compile_mode: str,
+        include_fixed_io_latency: bool = False,
+        fixed_io_write_coeff: float = 1.0,
+    ) -> float:
+        device = system.device
+
+        for op in [
+            self.Q_proj,
+            self.K_proj,
+            self.V_proj,
+            self.Q_mul_K,
+            self.A_mul_V,
+            self.H_matmul0,
+        ]:
+            if hasattr(op, "include_fixed_io_latency"):
+                op.include_fixed_io_latency = include_fixed_io_latency
+            if hasattr(op, "fixed_io_write_coeff"):
+                op.fixed_io_write_coeff = fixed_io_write_coeff
+
+        q_latency = (
+            self.Q_proj.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        k_latency = (
+            self.K_proj.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        v_latency = (
+            self.V_proj.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        qkv_latency = q_latency + k_latency + v_latency
+
+        q_mul_k_latency = (
+            self.Q_mul_K.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        a_mul_v_latency = (
+            self.A_mul_V.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        h_matmul0_latency = (
+            self.H_matmul0.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        softmax_latency = (
+            self.A_softmax.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.softmax
+        )
+        layernorm_latency = (
+            self.layer_norm0.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.layernorm
+        )
+
+        allreduce_latency = 0.0
+        if self.device_count > 1 and self.use_allreduce:
+            latency_val = self.allreduce_mha.simulate(system.interconnect)
+            allreduce_latency = float(latency_val) if latency_val is not None else 0.0
+
+        total = (
+            qkv_latency
+            + q_mul_k_latency
+            + a_mul_v_latency
+            + h_matmul0_latency
+            + softmax_latency
+            + layernorm_latency
+            + allreduce_latency
+        )
+        self.latency = total
+        return total
+
+    def run_on_gpu(self) -> float:  # type: ignore[override]
+        q_latency = self.Q_proj.run_on_gpu()
+        k_latency = self.K_proj.run_on_gpu()
+        v_latency = self.V_proj.run_on_gpu()
+        qkv_latency = q_latency + k_latency + v_latency
+
+        q_mul_k_latency = self.Q_mul_K.run_on_gpu()
+        a_mul_v_latency = self.A_mul_V.run_on_gpu()
+        h_matmul0_latency = self.H_matmul0.run_on_gpu()
+        softmax_latency = self.A_softmax.run_on_gpu()
+        layernorm_latency = self.layer_norm0.run_on_gpu()
+
+        total = (
+            qkv_latency
+            + q_mul_k_latency
+            + a_mul_v_latency
+            + h_matmul0_latency
+            + softmax_latency
+            + layernorm_latency
+        )
+        self.latency_on_gpu = total
+        return total
+
+
+class TPAutoregStageGQA(TPAutoregStageMHA):
+    """Autoregressive GQA attention with explicit KV head grouping."""
+
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        device_count: int,
+        data_type: DataType,
+        *,
+        num_kv_heads: int,
+        use_allreduce: bool = True,
+    ) -> None:
+        if num_kv_heads <= 0 or num_kv_heads > n_heads:
+            raise ValueError("num_kv_heads must be in (0, num_heads]")
+        if n_heads % num_kv_heads != 0:
+            raise ValueError("num_heads must be divisible by num_kv_heads")
+        if num_kv_heads % device_count != 0:
+            raise ValueError("num_kv_heads must be divisible by device_count")
+
+        super().__init__(
+            d_model,
+            n_heads,
+            device_count,
+            data_type,
+            use_allreduce=use_allreduce,
+        )
+
+        self.num_kv_heads = num_kv_heads
+
+        d = d_model
+        h = n_heads
+        dev_cnt = device_count
+        d_h = d // h
+        kv_heads_per_device = num_kv_heads // dev_cnt
+        kv_dim_per_device = kv_heads_per_device * d_h
+
+        # Q and output projection keep MHA shapes.
+        self.Wq = Tensor([d, d // dev_cnt], data_type)
+        self.W0 = Tensor([d // dev_cnt, d], data_type)
+
+        # K/V projections reduced to num_kv_heads.
+        self.Wk = Tensor([d, kv_dim_per_device], data_type)
+        self.Wv = Tensor([d, kv_dim_per_device], data_type)
+
+    def __call__(self, x: Tensor, seq_len: int) -> Tensor:  # type: ignore[override]
+        b, _, d = x.shape
+        assert d == self.d_model
+        h = self.n_heads
+        dev_cnt = self.device_count
+        d_h = d // h
+
+        q_heads_per_device = h // dev_cnt
+        kv_heads_per_device = self.num_kv_heads // dev_cnt
+
+        if kv_heads_per_device == 0 or q_heads_per_device % kv_heads_per_device != 0:
+            raise ValueError("Invalid GQA configuration for given device_count")
+        group_size = q_heads_per_device // kv_heads_per_device
+
+        # KV cache with reduced KV heads per device.
+        K_cache = Tensor([b, kv_heads_per_device, d_h, seq_len], self.data_type)
+        V_cache = Tensor([b, kv_heads_per_device, seq_len, d_h], self.data_type)
+
+        # Projections.
+        q = self.Q_proj(x, self.Wq)  # [b, 1, d/dev_cnt]
+        k = self.K_proj(x, self.Wk)  # [b, 1, kv_heads_per_device * d_h]
+        v = self.V_proj(x, self.Wv)  # [b, 1, kv_heads_per_device * d_h]
+
+        # === Q path ===
+        # [b, 1, d/dev_cnt] -> [b, 1, q_heads_per_device, d_h]
+        q = self.Q_reshape(q, [b, 1, q_heads_per_device, d_h])
+        # -> [b, 1, kv_heads_per_device, group_size, d_h]
+        q = self.Q_reshape(q, [b, 1, kv_heads_per_device, group_size, d_h])
+        # -> [b, kv_heads_per_device, group_size, 1, d_h]
+        q = self.Q_transpose(q, [0, 2, 3, 1, 4])
+        # Drop the length-1 sequence dimension and keep group as M dimension.
+        # [b * kv_heads_per_device, group_size, d_h]
+        q_flat = self.Q_reshape(q, [b * kv_heads_per_device, group_size, d_h])
+
+        # === K/V path ===
+        # K: [b, 1, kv*d_h] -> [b, 1, kv, d_h]
+        k = self.K_reshape(k, [b, 1, kv_heads_per_device, d_h])
+        # -> [b, kv, d_h, 1]
+        k_T = self.K_transpose(k, [0, 2, 3, 1])
+
+        # V: [b, 1, kv*d_h] -> [b, 1, kv, d_h]
+        v = self.V_reshape(v, [b, 1, kv_heads_per_device, d_h])
+        # -> [b, kv, 1, d_h]
+        v_T = self.V_transpose(v, [0, 2, 1, 3])
+
+        # Append current step to KV cache along the sequence dimension.
+        K_T = self.K_concat(K_cache, k_T, 3)  # [b, kv, d_h, S]
+        V_T = self.V_concat(V_cache, v_T, 2)  # [b, kv, S, d_h]
+        seq_total = K_T.shape[3]
+
+        # K: [b, kv, d_h, S] -> [b * kv, d_h, S]
+        K_flat = self.K_reshape(K_T, [b * kv_heads_per_device, d_h, seq_total])
+
+        # QK^T: [b*kv, group_size, d_h] x [b*kv, d_h, S] -> [b*kv, group_size, S]
+        a = self.Q_mul_K(q_flat, K_flat)
+
+        a_prob = self.A_softmax(a)
+
+        # V: [b, kv, S, d_h] -> [b * kv, S, d_h]
+        V_flat = self.V_reshape(V_T, [b * kv_heads_per_device, seq_total, d_h])
+
+        # AV: [b*kv, group_size, S] x [b*kv, S, d_h] -> [b*kv, group_size, d_h]
+        h_flat = self.A_mul_V(a_prob, V_flat)
+
+        # [b*kv, group_size, d_h] -> [b, kv, group_size, d_h]
+        h_grouped = self.H_reshape(
+            h_flat,
+            [b, kv_heads_per_device, group_size, d_h],
+        )
+        # -> [b, 1, q_heads_per_device, d_h]
+        h_heads = self.H_reshape(
+            h_grouped,
+            [b, 1, q_heads_per_device, d_h],
+        )
+        h0 = self.H_reshape(h_heads, [b, 1, d // dev_cnt])
+        h0 = self.H_matmul0(h0, self.W0)
+        h0 = self.layer_norm0(h0)
+        if dev_cnt > 1 and self.use_allreduce:
+            h0 = self.allreduce_mha(h0)
+
+        # Exact KV cache memory for num_kv_heads.
+        logical_K_elems = b * kv_heads_per_device * d_h * seq_len
+        logical_V_elems = b * kv_heads_per_device * seq_len * d_h
+
+        self.memory_requirement = (
+            self.Wq.size * self.Wq.data_type.word_size
+            + self.Wk.size * self.Wk.data_type.word_size
+            + self.Wv.size * self.Wv.data_type.word_size
+            + self.W0.size * self.W0.data_type.word_size
+            + logical_K_elems * self.data_type.word_size
+            + logical_V_elems * self.data_type.word_size
+        )
+        return h0
+
+    # === performance ===
+    def roofline_model(self, system: System) -> float:  # type: ignore[override]
+        device = system.device
+
+        q_latency = (
+            self.Q_proj.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        k_latency = (
+            self.K_proj.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        v_latency = (
+            self.V_proj.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        qkv_latency = q_latency + k_latency + v_latency
+
+        q_mul_k_latency = (
+            self.Q_mul_K.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        a_mul_v_latency = (
+            self.A_mul_V.roofline_model(device) + device.compute_module.overhead.matmul
+        )
+        h_matmul0_latency = (
+            self.H_matmul0.roofline_model(device)
+            + device.compute_module.overhead.matmul
+        )
+        softmax_latency = (
+            self.A_softmax.roofline_model(device)
+            + device.compute_module.overhead.softmax
+        )
+        layernorm_latency = (
+            self.layer_norm0.roofline_model(device)
+            + device.compute_module.overhead.layernorm
+        )
+        allreduce_latency = 0.0
+        if self.device_count > 1 and self.use_allreduce:
+            latency_val = self.allreduce_mha.simulate(system.interconnect)
+            allreduce_latency = float(latency_val) if latency_val is not None else 0.0
+        total = (
+            qkv_latency
+            + q_mul_k_latency
+            + a_mul_v_latency
+            + h_matmul0_latency
+            + softmax_latency
+            + layernorm_latency
+            + allreduce_latency
+        )
+        self.roofline_latency = total
+        return total
+
+    def compile_and_simulate(  # type: ignore[override]
+        self,
+        system: System,
+        compile_mode: str,
+        include_fixed_io_latency: bool = False,
+        fixed_io_write_coeff: float = 1.0,
+    ) -> float:
+        device = system.device
+        for op in [
+            self.Q_proj,
+            self.K_proj,
+            self.V_proj,
+            self.Q_mul_K,
+            self.A_mul_V,
+            self.H_matmul0,
+        ]:
+            if hasattr(op, "include_fixed_io_latency"):
+                op.include_fixed_io_latency = include_fixed_io_latency
+            if hasattr(op, "fixed_io_write_coeff"):
+                op.fixed_io_write_coeff = fixed_io_write_coeff
+
+        q_latency = (
+            self.Q_proj.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        k_latency = (
+            self.K_proj.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        v_latency = (
+            self.V_proj.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        qkv_latency = q_latency + k_latency + v_latency
+
+        q_mul_k_latency = (
+            self.Q_mul_K.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        a_mul_v_latency = (
+            self.A_mul_V.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        h_matmul0_latency = (
+            self.H_matmul0.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.matmul
+        )
+        softmax_latency = (
+            self.A_softmax.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.softmax
+        )
+        layernorm_latency = (
+            self.layer_norm0.compile_and_simulate(device, compile_mode)
+            + device.compute_module.overhead.layernorm
+        )
+        allreduce_latency = 0.0
+        if self.device_count > 1 and self.use_allreduce:
+            latency_val = self.allreduce_mha.simulate(system.interconnect)
+            allreduce_latency = float(latency_val) if latency_val is not None else 0.0
+        total = (
+            qkv_latency
+            + q_mul_k_latency
+            + a_mul_v_latency
+            + h_matmul0_latency
+            + softmax_latency
+            + layernorm_latency
+            + allreduce_latency
+        )
+        self.latency = total
+        return total
+
+    def run_on_gpu(self) -> float:  # type: ignore[override]
+        q_latency = self.Q_proj.run_on_gpu()
+        k_latency = self.K_proj.run_on_gpu()
+        v_latency = self.V_proj.run_on_gpu()
+        qkv_latency = q_latency + k_latency + v_latency
+
         q_mul_k_latency = self.Q_mul_K.run_on_gpu()
         a_mul_v_latency = self.A_mul_V.run_on_gpu()
         h_matmul0_latency = self.H_matmul0.run_on_gpu()
@@ -632,10 +1168,10 @@ class ModularTransformerBlockAutoTP(Operator):
     """Composable transformer block for autoregressive workloads."""
 
     def __init__(
-        self,TPAutoregStageMHA
-        attention_stage: TPAutoregAttentionStage,
+        self,
+        attention_stage,
         feedforward_stage: TPFeedForwardStage,
-    ):
+    ) -> None:
         super().__init__(0, 0, 0, 0, attention_stage.data_type)
         self.attention_stage = attention_stage
         self.feedforward_stage = feedforward_stage
@@ -719,7 +1255,7 @@ def build_tp_autoreg_block(
     use_attention_allreduce: bool = True,
     use_ffn_allreduce: bool = True,
 ) -> ModularTransformerBlockAutoTP:
-    attention = TPAutoregAttentionStage(
+    attention = TPAutoregStageMHA(
         d_model,
         n_heads,
         device_count,
