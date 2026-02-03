@@ -1,6 +1,6 @@
 from software_model.transformer import (
-    TransformerBlockInitComputationTP,
-    TransformerBlockAutoRegressionTP,
+    ConfigurableTransformerBlockInitTP,
+    ConfigurableTransformerBlockAutoRegressionTP,
 )
 from software_model.utils import data_type_dict, Tensor
 from hardware_model.system import system_dict
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     if args.init:
         print("Initial computation")
         if args.simgpu:
-            model = TransformerBlockInitComputationTP(
+            model = ConfigurableTransformerBlockInitTP(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,
@@ -79,7 +79,7 @@ if __name__ == "__main__":
                 )
 
         if args.simgpu_hbf:
-            model = TransformerBlockInitComputationTP(
+            model = ConfigurableTransformerBlockInitTP(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,
@@ -123,7 +123,7 @@ if __name__ == "__main__":
                     else f"transformer_A100_HBF_sim_HBF{bw_tag}{coeff_tag}{latency_tag}{seq_len_tag}.csv"
                 )
         if args.simtpu:
-            model = TransformerBlockInitComputationTP(
+            model = ConfigurableTransformerBlockInitTP(
                 d_model=12288,
                 n_heads=96,
                 device_count=8,
@@ -138,7 +138,7 @@ if __name__ == "__main__":
                 model.compile_and_simulate(TPU_system, compile_mode="heuristic-TPU")
                 file_name = "transformer_TPUv3_sim.csv"
         if args.gpu:
-            model = TransformerBlockInitComputationTP(
+            model = ConfigurableTransformerBlockInitTP(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,
@@ -150,7 +150,7 @@ if __name__ == "__main__":
         print("Auto-regression")
         output_token_length = 1024
         if args.simgpu:
-            model = TransformerBlockAutoRegressionTP(
+            model = ConfigurableTransformerBlockAutoRegressionTP(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,
@@ -176,7 +176,7 @@ if __name__ == "__main__":
                 )
         if args.simgpu_hbf:
             print("Simulating on A100 HBF")
-            model = TransformerBlockAutoRegressionTP(
+            model = ConfigurableTransformerBlockAutoRegressionTP(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,
@@ -219,7 +219,7 @@ if __name__ == "__main__":
                     else f"transformerAR_A100_HBF_sim{bw_tag}{coeff_tag}{latency_tag}{seq_len_tag}.csv"
                 )
         if args.simtpu:
-            model = TransformerBlockAutoRegressionTP(
+            model = ConfigurableTransformerBlockAutoRegressionTP(
                 d_model=12288,
                 n_heads=96,
                 device_count=8,
@@ -236,7 +236,7 @@ if __name__ == "__main__":
                 model.compile_and_simulate(TPU_system, compile_mode="heuristic-TPU")
                 file_name = "transformerAR_TPUv3_sim.csv"
         if args.gpu:
-            model = TransformerBlockAutoRegressionTP(
+            model = ConfigurableTransformerBlockAutoRegressionTP(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,

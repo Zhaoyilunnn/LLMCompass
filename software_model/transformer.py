@@ -17,20 +17,42 @@ from typing import List
 from hardware_model.system import System
 
 
-class TransformerBlockInitComputationTP(Operator):
-    def __init__(self, d_model, n_heads, device_count, data_type: DataType):
+class ConfigurableTransformerBlockInitTP(Operator):
+    def __init__(
+        self,
+        d_model,
+        n_heads,
+        device_count,
+        data_type: DataType,
+        ffn_multiplier: int = 4,
+        use_allreduce_mha: bool = True,
+        use_allreduce_ffn: bool = True,
+    ):
         super().__init__(0, 0, 0, 0, data_type)
         self.d_model = d_model
         self.n_heads = n_heads
         self.device_count = device_count
-        # parameters per device
+        self.ffn_multiplier = ffn_multiplier
+        self.use_allreduce_mha = use_allreduce_mha
+        self.use_allreduce_ffn = use_allreduce_ffn
+
+        if d_model % n_heads != 0:
+            raise ValueError("d_model must be divisible by n_heads")
+        if (ffn_multiplier * d_model) % device_count != 0:
+            raise ValueError(
+                "ffn_multiplier * d_model must be divisible by device_count"
+            )
+
         d = d_model
+        ffn_per_device = (ffn_multiplier * d) // device_count
+        self.ffn_hidden_per_device = ffn_per_device
+        # parameters per device
         self.Wq = Tensor([d, d // device_count], data_type)
         self.Wk = Tensor([d, d // device_count], data_type)
         self.Wv = Tensor([d, d // device_count], data_type)
         self.W0 = Tensor([d // device_count, d], data_type)
-        self.W1 = Tensor([d, 4 * d // device_count], data_type)
-        self.W2 = Tensor([4 * d // device_count, d], data_type)
+        self.W1 = Tensor([d, ffn_per_device], data_type)
+        self.W2 = Tensor([ffn_per_device, d], data_type)
         # operators per device
         # # multi-head attention
         self.Q_proj = Matmul(data_type)
@@ -95,17 +117,17 @@ class TransformerBlockInitComputationTP(Operator):
         assert H0.shape == [b, s, d]
         H0 = self.layer_norm0(H0)
         assert H0.shape == [b, s, d]
-        if dev_cnt > 1:
+        if dev_cnt > 1 and self.use_allreduce_mha:
             H0 = self.allreduce_mha(H0)
 
         # feed-forward network
-        H1 = self.H_matmul1(H0, self.W1)  # [b, s, 4 * d / dev_cnt]
-        assert H1.shape == [b, s, 4 * d // dev_cnt]
+        H1 = self.H_matmul1(H0, self.W1)
+        assert H1.shape == [b, s, self.ffn_hidden_per_device]
         H1 = self.H_gelu(H1)
         H2 = self.H_matmul2(H1, self.W2)  #  [b, s, d]
         assert H2.shape == [b, s, d]
         H2 = self.layer_norm1(H2)
-        if dev_cnt > 1:
+        if dev_cnt > 1 and self.use_allreduce_ffn:
             H2 = self.allreduce_ffn(H2)
 
         assert H2.shape == [b, s, d]
@@ -164,12 +186,12 @@ class TransformerBlockInitComputationTP(Operator):
         )
 
         # allreduce
-        if self.device_count > 1:
-            allreduce_latency = self.allreduce_mha.simulate(interconnect)
+        allreduce_latency = 0.0
+        allreduce_total_latency = 0.0
+        if self.device_count > 1 and self.use_allreduce_mha:
+            latency_val = self.allreduce_mha.simulate(interconnect)
+            allreduce_latency = float(latency_val) if latency_val is not None else 0.0
             allreduce_total_latency = allreduce_latency * 2
-        else:
-            allreduce_total_latency = 0
-            allreduce_total_latency = 0
 
         # others
 
@@ -278,12 +300,12 @@ class TransformerBlockInitComputationTP(Operator):
         )
 
         # allreduce
-        if self.device_count > 1:
-            allreduce_latency = self.allreduce_mha.simulate(interconnect)
+        allreduce_latency = 0.0
+        allreduce_total_latency = 0.0
+        if self.device_count > 1 and self.use_allreduce_mha:
+            latency_val = self.allreduce_mha.simulate(interconnect)
+            allreduce_latency = float(latency_val) if latency_val is not None else 0.0
             allreduce_total_latency = allreduce_latency * 2
-        else:
-            allreduce_latency = 0
-            allreduce_total_latency = 0
 
         # others
 
@@ -374,20 +396,42 @@ class TransformerBlockInitComputationTP(Operator):
         return self.latency_on_gpu
 
 
-class TransformerBlockAutoRegressionTP(Operator):
-    def __init__(self, d_model, n_heads, device_count, data_type: DataType):
+class ConfigurableTransformerBlockAutoRegressionTP(Operator):
+    def __init__(
+        self,
+        d_model,
+        n_heads,
+        device_count,
+        data_type: DataType,
+        ffn_multiplier: int = 4,
+        use_allreduce_mha: bool = True,
+        use_allreduce_ffn: bool = True,
+    ):
         super().__init__(0, 0, 0, 0, data_type)
         self.d_model = d_model
         self.n_heads = n_heads
         self.device_count = device_count
-        # parameters per device
+        self.ffn_multiplier = ffn_multiplier
+        self.use_allreduce_mha = use_allreduce_mha
+        self.use_allreduce_ffn = use_allreduce_ffn
+
+        if d_model % n_heads != 0:
+            raise ValueError("d_model must be divisible by n_heads")
+        if (ffn_multiplier * d_model) % device_count != 0:
+            raise ValueError(
+                "ffn_multiplier * d_model must be divisible by device_count"
+            )
+
         d = d_model
+        ffn_per_device = (ffn_multiplier * d) // device_count
+        self.ffn_hidden_per_device = ffn_per_device
+        # parameters per device
         self.Wq = Tensor([d, d // device_count], data_type)
         self.Wk = Tensor([d, d // device_count], data_type)
         self.Wv = Tensor([d, d // device_count], data_type)
         self.W0 = Tensor([d // device_count, d], data_type)
-        self.W1 = Tensor([d, 4 * d // device_count], data_type)
-        self.W2 = Tensor([4 * d // device_count, d], data_type)
+        self.W1 = Tensor([d, ffn_per_device], data_type)
+        self.W2 = Tensor([ffn_per_device, d], data_type)
         # operators per device
         # # multi-head attention
         self.Q_proj = Matmul(data_type)
@@ -463,17 +507,17 @@ class TransformerBlockAutoRegressionTP(Operator):
         assert h0.shape == [b, 1, d]
         h0 = self.layer_norm0(h0)
         assert h0.shape == [b, 1, d]
-        if dev_cnt > 1:
+        if dev_cnt > 1 and self.use_allreduce_mha:
             h0 = self.allreduce_mha(h0)
 
         # feed-forward network
-        h1 = self.H_matmul1(h0, self.W1)  # [b, 1, 4 * d / dev_cnt]
-        assert h1.shape == [b, 1, 4 * d // dev_cnt]
+        h1 = self.H_matmul1(h0, self.W1)
+        assert h1.shape == [b, 1, self.ffn_hidden_per_device]
         h1 = self.H_gelu(h1)
         h2 = self.H_matmul2(h1, self.W2)  #  [b, 1, d]
         assert h2.shape == [b, 1, d]
         h2 = self.layer_norm1(h2)
-        if dev_cnt > 1:
+        if dev_cnt > 1 and self.use_allreduce_ffn:
             h2 = self.allreduce_ffn(h2)
 
         assert h2.shape == [b, 1, d]
@@ -542,8 +586,9 @@ class TransformerBlockAutoRegressionTP(Operator):
         )
 
         # allreduce
-        if self.device_count > 1:
-            allreduce_latency = self.allreduce_mha.simulate(interconnect)
+        if self.device_count > 1 and self.use_allreduce_mha:
+            latency_val = self.allreduce_mha.simulate(interconnect)
+            allreduce_latency = float(latency_val) if latency_val is not None else 0.0
             allreduce_total_latency = allreduce_latency * 2
         else:
             allreduce_latency = 0
@@ -656,12 +701,12 @@ class TransformerBlockAutoRegressionTP(Operator):
         )
 
         # allreduce
+        allreduce_latency = 0.0
+        allreduce_total_latency = 0.0
         if self.device_count > 1:
-            allreduce_latency = self.allreduce_mha.simulate(interconnect)
+            latency_val = self.allreduce_mha.simulate(interconnect)
+            allreduce_latency = float(latency_val) if latency_val is not None else 0.0
             allreduce_total_latency = allreduce_latency * 2
-        else:
-            allreduce_latency = 0
-            allreduce_total_latency = 0
 
         # others
 
@@ -751,6 +796,11 @@ class TransformerBlockAutoRegressionTP(Operator):
             + allreduce_total_latency
         )
         return self.latency_on_gpu
+
+
+"""Backwards-compatibility aliases for legacy class names."""
+TransformerBlockInitComputationTP = ConfigurableTransformerBlockInitTP
+TransformerBlockAutoRegressionTP = ConfigurableTransformerBlockAutoRegressionTP
 
 
 class LLMInitComputationTP:
