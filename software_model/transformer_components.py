@@ -146,6 +146,16 @@ class TPInitStageMHA(BaseTPAttentionStage):
             + allreduce_latency
         )
         self.roofline_latency = total
+        # Per-stage breakdown for modular blocks
+        self.roofline_breakdown = {
+            "Q_K_V": qkv_latency,
+            "Q_mul_K": q_mul_k_latency,
+            "A_mul_V": a_mul_v_latency,
+            "Wo_proj": h_matmul0_latency,
+            "Softmax": softmax_latency,
+            "LayerNorm_MHA": layernorm_latency,
+            "AllReduce_MHA": allreduce_latency,
+        }
         return total
 
     def compile_and_simulate(
@@ -210,6 +220,16 @@ class TPInitStageMHA(BaseTPAttentionStage):
             + allreduce_latency
         )
         self.latency = total
+        # Per-stage breakdown for modular blocks
+        self.sim_breakdown = {
+            "Q_K_V": qkv_latency,
+            "Q_mul_K": q_mul_k_latency,
+            "A_mul_V": a_mul_v_latency,
+            "Wo_proj": h_matmul0_latency,
+            "Softmax": softmax_latency,
+            "LayerNorm_MHA": layernorm_latency,
+            "AllReduce_MHA": allreduce_latency,
+        }
         return total
 
     def run_on_gpu(self) -> float:
@@ -354,6 +374,15 @@ class TPAutoregStageMHA(BaseTPAttentionStage):
             + allreduce_latency
         )
         self.roofline_latency = total
+        self.roofline_breakdown = {
+            "Q_K_V": qkv_latency,
+            "Q_mul_K": q_mul_k_latency,
+            "A_mul_V": a_mul_v_latency,
+            "Wo_proj": h_matmul0_latency,
+            "Softmax": softmax_latency,
+            "LayerNorm_MHA": layernorm_latency,
+            "AllReduce_MHA": allreduce_latency,
+        }
         return total
 
     def compile_and_simulate(  # type: ignore[override]
@@ -415,6 +444,15 @@ class TPAutoregStageMHA(BaseTPAttentionStage):
             + allreduce_latency
         )
         self.latency = total
+        self.sim_breakdown = {
+            "Q_K_V": qkv_latency,
+            "Q_mul_K": q_mul_k_latency,
+            "A_mul_V": a_mul_v_latency,
+            "Wo_proj": h_matmul0_latency,
+            "Softmax": softmax_latency,
+            "LayerNorm_MHA": layernorm_latency,
+            "AllReduce_MHA": allreduce_latency,
+        }
         return total
 
     def run_on_gpu(self) -> float:  # type: ignore[override]
@@ -615,6 +653,15 @@ class TPInitStageGQA(TPInitStageMHA):
             + allreduce_latency
         )
         self.roofline_latency = total
+        self.roofline_breakdown = {
+            "Q_K_V": qkv_latency,
+            "Q_mul_K": q_mul_k_latency,
+            "A_mul_V": a_mul_v_latency,
+            "Wo_proj": h_matmul0_latency,
+            "Softmax": softmax_latency,
+            "LayerNorm_MHA": layernorm_latency,
+            "AllReduce_MHA": allreduce_latency,
+        }
         return total
 
     def compile_and_simulate(  # type: ignore[override]
@@ -689,6 +736,15 @@ class TPInitStageGQA(TPInitStageMHA):
             + allreduce_latency
         )
         self.latency = total
+        self.sim_breakdown = {
+            "Q_K_V": q_latency + k_latency + v_latency,
+            "Q_mul_K": q_mul_k_latency,
+            "A_mul_V": a_mul_v_latency,
+            "Wo_proj": h_matmul0_latency,
+            "Softmax": softmax_latency,
+            "LayerNorm_MHA": layernorm_latency,
+            "AllReduce_MHA": allreduce_latency,
+        }
         return total
 
     def run_on_gpu(self) -> float:  # type: ignore[override]
@@ -901,6 +957,15 @@ class TPAutoregStageGQA(TPAutoregStageMHA):
             + allreduce_latency
         )
         self.roofline_latency = total
+        self.roofline_breakdown = {
+            "Q_K_V": qkv_latency,
+            "Q_mul_K": q_mul_k_latency,
+            "A_mul_V": a_mul_v_latency,
+            "Wo_proj": h_matmul0_latency,
+            "Softmax": softmax_latency,
+            "LayerNorm_MHA": layernorm_latency,
+            "AllReduce_MHA": allreduce_latency,
+        }
         return total
 
     def compile_and_simulate(  # type: ignore[override]
@@ -972,6 +1037,15 @@ class TPAutoregStageGQA(TPAutoregStageMHA):
             + allreduce_latency
         )
         self.latency = total
+        self.sim_breakdown = {
+            "Q_K_V": qkv_latency,
+            "Q_mul_K": q_mul_k_latency,
+            "A_mul_V": a_mul_v_latency,
+            "Wo_proj": h_matmul0_latency,
+            "Softmax": softmax_latency,
+            "LayerNorm_MHA": layernorm_latency,
+            "AllReduce_MHA": allreduce_latency,
+        }
         return total
 
     def run_on_gpu(self) -> float:  # type: ignore[override]
@@ -1063,6 +1137,13 @@ class TPFeedForwardStage(Operator):
             allreduce = float(latency_val) if latency_val is not None else 0.0
         total = matmul1 + gelu + matmul2 + layernorm + allreduce
         self.roofline_latency = total
+        self.roofline_breakdown = {
+            "W1_proj": matmul1,
+            "W2_proj": matmul2,
+            "LayerNorm_FFN": layernorm,
+            "GeLU": gelu,
+            "AllReduce_FFN": allreduce,
+        }
         return total
 
     def compile_and_simulate(
@@ -1101,6 +1182,15 @@ class TPFeedForwardStage(Operator):
             allreduce = float(latency_val) if latency_val is not None else 0.0
         total = matmul1 + gelu + matmul2 + layernorm + allreduce
         self.latency = total
+        self.sim_breakdown = {
+            "W1_proj": matmul1,
+            "W2_proj": matmul2,
+            "LayerNorm_FFN": layernorm,
+            "GeLU": gelu,
+            "AllReduce_FFN": allreduce,
+        }
+        self.simulate_log = f"0.0, 0.0, 0.0, 0.0, {matmul1}, {matmul2}, 0.0, 0.0, {layernorm}, {gelu}, 0.0, {allreduce}"
+        self.simluate_log = self.simulate_log
         return total
 
     def run_on_gpu(self) -> float:
@@ -1130,9 +1220,40 @@ class ModularTransformerBlockInitTP(Operator):
         return self.feedforward_stage(self.attention_stage(X))
 
     def roofline_model(self, system: System) -> float:
-        attn = self.attention_stage.roofline_model(system)
-        ffn = self.feedforward_stage.roofline_model(system)
-        self.roofline_latency = attn + ffn
+        attn_latency = self.attention_stage.roofline_model(system)
+        ffn_latency = self.feedforward_stage.roofline_model(system)
+
+        categories = [
+            "Q_K_V",
+            "Q_mul_K",
+            "A_mul_V",
+            "Wo_proj",
+            "W1_proj",
+            "W2_proj",
+            "Softmax",
+            "LayerNorm_MHA",
+            "LayerNorm_FFN",
+            "GeLU",
+            "AllReduce_MHA",
+            "AllReduce_FFN",
+        ]
+        vals = []
+        for c in categories:
+            if (
+                hasattr(self.attention_stage, "roofline_breakdown")
+                and c in self.attention_stage.roofline_breakdown
+            ):
+                vals.append(self.attention_stage.roofline_breakdown[c])
+            elif (
+                hasattr(self.feedforward_stage, "roofline_breakdown")
+                and c in self.feedforward_stage.roofline_breakdown
+            ):
+                vals.append(self.feedforward_stage.roofline_breakdown[c])
+            else:
+                vals.append(0.0)
+
+        self.roofline_log = ", ".join(str(v) for v in vals)
+        self.roofline_latency = attn_latency + ffn_latency
         return self.roofline_latency
 
     def compile_and_simulate(
@@ -1142,19 +1263,51 @@ class ModularTransformerBlockInitTP(Operator):
         include_fixed_io_latency: bool = False,
         fixed_io_write_coeff: float = 1.0,
     ) -> float:
-        attn = self.attention_stage.compile_and_simulate(
+        attn_latency = self.attention_stage.compile_and_simulate(
             system,
             compile_mode,
             include_fixed_io_latency=include_fixed_io_latency,
             fixed_io_write_coeff=fixed_io_write_coeff,
         )
-        ffn = self.feedforward_stage.compile_and_simulate(
+        ffn_latency = self.feedforward_stage.compile_and_simulate(
             system,
             compile_mode,
             include_fixed_io_latency=include_fixed_io_latency,
             fixed_io_write_coeff=fixed_io_write_coeff,
         )
-        self.latency = attn + ffn
+
+        categories = [
+            "Q_K_V",
+            "Q_mul_K",
+            "A_mul_V",
+            "Wo_proj",
+            "W1_proj",
+            "W2_proj",
+            "Softmax",
+            "LayerNorm_MHA",
+            "LayerNorm_FFN",
+            "GeLU",
+            "AllReduce_MHA",
+            "AllReduce_FFN",
+        ]
+        vals = []
+        for c in categories:
+            if (
+                hasattr(self.attention_stage, "sim_breakdown")
+                and c in self.attention_stage.sim_breakdown
+            ):
+                vals.append(self.attention_stage.sim_breakdown[c])
+            elif (
+                hasattr(self.feedforward_stage, "sim_breakdown")
+                and c in self.feedforward_stage.sim_breakdown
+            ):
+                vals.append(self.feedforward_stage.sim_breakdown[c])
+            else:
+                vals.append(0.0)
+
+        self.latency = attn_latency + ffn_latency
+        self.simulate_log = ", ".join(str(v) for v in vals)
+        self.simluate_log = self.simulate_log
         return self.latency
 
     def run_on_gpu(self) -> float:
@@ -1181,9 +1334,40 @@ class ModularTransformerBlockAutoTP(Operator):
         return self.feedforward_stage(self.attention_stage(x, seq_len))
 
     def roofline_model(self, system: System) -> float:
-        attn = self.attention_stage.roofline_model(system)
-        ffn = self.feedforward_stage.roofline_model(system)
-        self.roofline_latency = attn + ffn
+        attn_latency = self.attention_stage.roofline_model(system)
+        ffn_latency = self.feedforward_stage.roofline_model(system)
+
+        categories = [
+            "Q_K_V",
+            "Q_mul_K",
+            "A_mul_V",
+            "Wo_proj",
+            "W1_proj",
+            "W2_proj",
+            "Softmax",
+            "LayerNorm_MHA",
+            "LayerNorm_FFN",
+            "GeLU",
+            "AllReduce_MHA",
+            "AllReduce_FFN",
+        ]
+        vals = []
+        for c in categories:
+            if (
+                hasattr(self.attention_stage, "roofline_breakdown")
+                and c in self.attention_stage.roofline_breakdown
+            ):
+                vals.append(self.attention_stage.roofline_breakdown[c])
+            elif (
+                hasattr(self.feedforward_stage, "roofline_breakdown")
+                and c in self.feedforward_stage.roofline_breakdown
+            ):
+                vals.append(self.feedforward_stage.roofline_breakdown[c])
+            else:
+                vals.append(0.0)
+
+        self.roofline_log = ", ".join(str(v) for v in vals)
+        self.roofline_latency = attn_latency + ffn_latency
         return self.roofline_latency
 
     def compile_and_simulate(
@@ -1193,19 +1377,51 @@ class ModularTransformerBlockAutoTP(Operator):
         include_fixed_io_latency: bool = False,
         fixed_io_write_coeff: float = 1.0,
     ) -> float:
-        attn = self.attention_stage.compile_and_simulate(
+        attn_latency = self.attention_stage.compile_and_simulate(
             system,
             compile_mode,
             include_fixed_io_latency=include_fixed_io_latency,
             fixed_io_write_coeff=fixed_io_write_coeff,
         )
-        ffn = self.feedforward_stage.compile_and_simulate(
+        ffn_latency = self.feedforward_stage.compile_and_simulate(
             system,
             compile_mode,
             include_fixed_io_latency=include_fixed_io_latency,
             fixed_io_write_coeff=fixed_io_write_coeff,
         )
-        self.latency = attn + ffn
+
+        categories = [
+            "Q_K_V",
+            "Q_mul_K",
+            "A_mul_V",
+            "Wo_proj",
+            "W1_proj",
+            "W2_proj",
+            "Softmax",
+            "LayerNorm_MHA",
+            "LayerNorm_FFN",
+            "GeLU",
+            "AllReduce_MHA",
+            "AllReduce_FFN",
+        ]
+        vals = []
+        for c in categories:
+            if (
+                hasattr(self.attention_stage, "sim_breakdown")
+                and c in self.attention_stage.sim_breakdown
+            ):
+                vals.append(self.attention_stage.sim_breakdown[c])
+            elif (
+                hasattr(self.feedforward_stage, "sim_breakdown")
+                and c in self.feedforward_stage.sim_breakdown
+            ):
+                vals.append(self.feedforward_stage.sim_breakdown[c])
+            else:
+                vals.append(0.0)
+
+        self.latency = attn_latency + ffn_latency
+        self.simulate_log = ", ".join(str(v) for v in vals)
+        self.simluate_log = self.simulate_log
         return self.latency
 
     def run_on_gpu(self) -> float:
