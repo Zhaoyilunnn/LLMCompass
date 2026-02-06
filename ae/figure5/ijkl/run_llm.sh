@@ -1,6 +1,3 @@
-rm *.csv
-rm *.pdf
-
 cd ../../..
 
 # Modular transformer block experiments (MHA vs GQA) on A100
